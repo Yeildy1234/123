@@ -1,0 +1,153 @@
+// src/api/admin.js
+import { PrismaClient } from '@prisma/client';
+import { getSession } from 'next-auth/react';
+
+const prisma = new PrismaClient();
+
+export default async function handler(req, res) {
+  const session = await getSession({ req });
+
+  if (!session || !session.user || !session.user.email) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+  });
+
+  if (!user || !user.isAdmin) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
+  const now = new Date();
+  const lastGenerated = user.lastLoginCodeGenerated || new Date(0);
+  const daysSinceLastGenerated = Math.floor((now - lastGenerated) / (1000 * 60 * 60 * 24));
+
+  if (daysSinceLastGenerated < 33) {
+    return res.status(400).json({ message: 'Login code can only be generated every 33 days.' });
+  }
+
+  const newLoginCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  await prisma.user.update({
+    where: { email: user.email },
+    data: {
+      loginCode: newLoginCode,
+      lastLoginCodeGenerated: now,
+    },
+  });
+
+  res.status(200).json({ loginCode: newLoginCode });
+}npx create-expo-app WorkoutGymApp
+cd WorkoutGymApp
+npm install @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
+npm install react-native-paper react-native-vector-icons
+npm install axios// App.js
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+import HomeScreen from './src/screens/HomeScreen';
+import AdminScreen from './src/screens/AdminScreen';
+import { Provider } from 'react-redux';
+import { store } from './src/store';
+
+const Stack = createStackNavigator();
+
+export default function App() {
+  return (
+    <Provider store={store}>
+      <NavigationContainer>
+        <Stack.Navigator>
+          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="Admin" component={AdminScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </Provider>
+  );
+}// src/screens/AdminScreen.js
+import React, { useState } from 'react';
+import { View, Text, Button, Alert, StyleSheet } from 'react-native';
+import axios from 'axios';
+
+export default function AdminScreen() {
+  const [loading, setLoading] = useState(false);
+
+  const generateLoginCode = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.post('http://localhost:3000/api/admin');
+      Alert.alert('Success', `New login code: ${response.data.loginCode}`);
+    } catch (error) {
+      Alert.alert('Error', error.response?.data?.message || 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Admin Panel</Text>
+      <Button title="Generate Login Code" onPress={generateLoginCode} disabled={loading} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 24,
+    marginBottom: 20,
+  },
+});// src/screens/HomeScreen.js
+import React from 'react';
+import { View, Text, Button, StyleSheet } from 'react-native';
+import { useSelector } from 'react-redux';
+
+export default function HomeScreen({ navigation }) {
+  const isAdmin = useSelector((state) => state.auth.user?.isAdmin);
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Welcome to Workout Gym</Text>
+      {isAdmin && (
+        <Button title="Go to Admin Panel" onPress={() => navigation.navigate('Admin')} />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 24,
+    marginBottom: 20,
+  },
+});// src/store/index.js
+import { configureStore } from '@reduxjs/toolkit';
+import authReducer from './authSlice';
+
+export const store = configureStore({
+  reducer: {
+    auth: authReducer,
+  },
+});// src/store/authSlice.js
+import { createSlice } from '@reduxjs/toolkit';
+
+const authSlice = createSlice({
+  name: 'auth',
+  initialState: {
+    user: { isAdmin: true }, // Mocked admin user for demonstration
+  },
+  reducers: {},
+});
+
+export const { actions, reducer } = authSlice;
+export default reducer;
